@@ -1,7 +1,31 @@
 # configure the provider
 provider "aws" {
   region = "ap-south-1"
-  profile = "new_tf"
+  profile = "terraform-user"
+}
+
+#Creating private key
+resource "tls_private_key" "key" {
+  algorithm = "RSA"
+  rsa_bits = 4096
+}
+
+resource "aws_key_pair" "generated_key" {
+    key_name = "task3_key"
+    public_key = tls_private_key.key.public_key_openssh
+
+    depends_on = [
+        tls_private_key.key
+    ]
+}
+
+#Downloading priavte key
+resource "local_file" "file" {
+    content  = tls_private_key.key.private_key_pem
+    filename = "E:/Terraform/tasks cloud trainig/task3/task3_key.pem"
+    file_permission = "0400"
+
+    depends_on = [ aws_key_pair.generated_key ]
 }
 
 # creating a vpc
@@ -20,6 +44,7 @@ resource "aws_subnet" "sub_1a" {
   vpc_id     = "${aws_vpc.vpc.id}"
   cidr_block = "192.169.1.0/24"
   availability_zone = "ap-south-1a" 
+  map_public_ip_on_launch  =  true
 
   tags = {
     Name = "sub_1a"
@@ -30,7 +55,7 @@ resource "aws_subnet" "sub_1a" {
 # creating a subnet in 1b
 resource "aws_subnet" "sub_1b" {
   vpc_id     = "${aws_vpc.vpc.id}"
-  cidr_block = "191.169.2.0/24"
+  cidr_block = "192.169.2.0/24"
   availability_zone = "ap-south-1b"
 
   tags = {
@@ -61,13 +86,15 @@ resource "aws_route_table" "r" {
   tags = {
     Name = "r"
   }
-  depends_on = [ aws_internet_gateway.igw ]
+  depends_on = [ aws_internet_gateway.igw, aws_vpc.vpc ]
 }
 
 # associating route table
 resource "aws_route_table_association" "a" {
   subnet_id      = aws_subnet.sub_1a.id
   route_table_id = aws_route_table.r.id
+
+  depends_on = [ aws_route_table.r ]
 }
 
 # sg for wordpress
@@ -114,7 +141,7 @@ resource "aws_security_group" "wp_sg" {
 # sg for mysql
 resource "aws_security_group" "mysql_sg" {
   name        = "mysql sg"
-  description = ""
+  description = "ssh and mysql port"
   vpc_id      = "${aws_vpc.vpc.id}"
 
   ingress {
@@ -133,13 +160,6 @@ resource "aws_security_group" "mysql_sg" {
     cidr_blocks = [aws_vpc.vpc.cidr_block]
   }
 
-  ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   egress {
     from_port   = 0
     to_port     = 0
@@ -151,4 +171,31 @@ resource "aws_security_group" "mysql_sg" {
     Name = "mysql sg"
   }
   depends_on = [ aws_vpc.vpc ]
+}
+
+# wordpress ami
+resource "aws_instance" "wordpress" {
+    depends_on = [   aws_subnet.sub_1a, aws_security_group.wp_sg, ]
+    
+    ami           = "ami-02b9afddbf1c3b2e5"
+    instance_type = "t2.micro"
+    key_name = "task3_key"
+    vpc_security_group_ids = ["${aws_security_group.wp_sg.id}"]
+    subnet_id = aws_subnet.sub_1a.id
+    tags = {
+        Name = "WordPress"
+    }
+}
+
+# mysql ami
+resource "aws_instance" "mysql" {
+    depends_on = [    aws_subnet.sub_1b, aws_security_group.mysql_sg, ]
+    ami           = "ami-0d8b282f6227e8ffb"
+    instance_type = "t2.micro"
+    key_name = "task3_key"
+    vpc_security_group_ids = ["${aws_security_group.mysql_sg.id}"]
+    subnet_id = aws_subnet.sub_1b.id
+    tags = {
+        Name = "Mysql"
+    }
 }
